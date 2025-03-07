@@ -22,19 +22,23 @@ class StockData:
             '名称': 'stock_name',
             '最新价': 'current_price',
             '涨跌幅': 'change_percent',
+            '涨速': 'speed',
+            '5分钟涨跌': 'five_min_change',
+            '60日涨跌幅': 'sixty_day_change',
+            '年初至今涨跌幅': 'ytd_change',
             '成交量': 'volume',
-            '成交额': 'turnover',
-            '5日涨跌幅': 'five_day_change'
+            '成交额': 'turnover'
         }
         
         transformed_data = {}
         for old_key, new_key in field_mapping.items():
             try:
-                value = stock_data.get(old_key)
+                value = stock_data.get(old_key, 0)
                 
                 # 处理空值或无效值
                 if pd.isna(value) or value == '' or value is None:
-                    if new_key in ['change_percent', 'current_price', 'volume', 'turnover']:
+                    if new_key in ['change_percent', 'current_price', 'volume', 'turnover', 
+                                 'speed', 'five_min_change', 'sixty_day_change', 'ytd_change']:
                         transformed_data[new_key] = 0.0
                     else:
                         transformed_data[new_key] = ''
@@ -47,7 +51,8 @@ class StockData:
                         value = '0'
                 
                 # 转换数值类型
-                if new_key in ['change_percent', 'current_price', 'volume', 'turnover']:
+                if new_key in ['change_percent', 'current_price', 'volume', 'turnover',
+                             'speed', 'five_min_change', 'sixty_day_change', 'ytd_change']:
                     try:
                         transformed_data[new_key] = float(value)
                     except (ValueError, TypeError):
@@ -57,67 +62,40 @@ class StockData:
                     
             except Exception as e:
                 print(f"Error transforming {old_key} to {new_key}: {str(e)}")
-                # 设置默认值
-                if new_key in ['change_percent', 'current_price', 'volume', 'turnover']:
+                if new_key in ['change_percent', 'current_price', 'volume', 'turnover',
+                             'speed', 'five_min_change', 'sixty_day_change', 'ytd_change']:
                     transformed_data[new_key] = 0.0
                 else:
                     transformed_data[new_key] = ''
-        
-        # 确保5日涨跌幅字段存在
-        if '5日涨跌幅' in stock_data:
-            try:
-                value = stock_data['5日涨跌幅']
-                if isinstance(value, str):
-                    value = value.replace('%', '').strip()
-                transformed_data['five_day_change'] = float(value) if value else 0.0
-            except (ValueError, TypeError):
-                transformed_data['five_day_change'] = 0.0
-        else:
-            transformed_data['five_day_change'] = 0.0
-        
-        # 最后检查确保所有数值字段都是有效的浮点数
-        for key in ['change_percent', 'current_price', 'volume', 'turnover']:
-            if key not in transformed_data or not isinstance(transformed_data[key], (int, float)) or pd.isna(transformed_data[key]):
-                transformed_data[key] = 0.0
         
         return transformed_data
 
     def update_data(self):
         try:
             print("开始更新股票数据...")
+            # 获取实时行情数据
             stock_df = ak.stock_zh_a_spot_em()
             
-            # 确保数据框不为空
             if stock_df.empty:
                 print("警告：获取到的数据为空")
                 return
             
-            # 转换前打印原始数据示例
-            print("原始数据示例：")
-            print(stock_df.head())
-            
+            print("获取数据成功，开始处理...")
             stock_records = stock_df.to_dict('records')
             transformed_records = []
             
-            # 逐条转换数据并进行验证
             for record in stock_records:
                 transformed = self.transform_stock_data(record)
-                # 验证转换后的数据
-                if all(key in transformed for key in ['stock_code', 'stock_name', 'current_price', 'change_percent', 'volume', 'turnover']):
+                if all(key in transformed for key in ['stock_code', 'stock_name']):
                     transformed_records.append(transformed)
-                else:
-                    print(f"警告：数据记录格式不完整: {transformed}")
             
-            # 筛选创业板股票
             growth_stocks = [
                 stock for stock in transformed_records 
                 if stock['stock_code'].startswith(('300', '301'))
             ]
             
-            # 验证处理后的数据
-            print(f"处理后的数据示例：")
-            if growth_stocks:
-                print(growth_stocks[0])
+            # 按涨跌幅排序
+            growth_stocks.sort(key=lambda x: x['change_percent'], reverse=True)
             
             self.data_cache = {
                 'all_stocks': growth_stocks,
@@ -125,6 +103,8 @@ class StockData:
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
             self.last_update = datetime.now()
+            
+            print(f"数据更新完成，共处理 {len(growth_stocks)} 条记录")
             
         except Exception as e:
             print(f"更新数据时发生错误: {str(e)}")
