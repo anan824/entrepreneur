@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 import akshare as ak
 import pandas as pd
@@ -23,7 +23,8 @@ class StockData:
             '最新价': 'current_price',
             '涨跌幅': 'change_percent',
             '成交量': 'volume',
-            '成交额': 'turnover'
+            '成交额': 'turnover',
+            '5日涨跌幅': 'five_day_change'
         }
         
         transformed_data = {}
@@ -61,6 +62,18 @@ class StockData:
                     transformed_data[new_key] = 0.0
                 else:
                     transformed_data[new_key] = ''
+        
+        # 确保5日涨跌幅字段存在
+        if '5日涨跌幅' in stock_data:
+            try:
+                value = stock_data['5日涨跌幅']
+                if isinstance(value, str):
+                    value = value.replace('%', '').strip()
+                transformed_data['five_day_change'] = float(value) if value else 0.0
+            except (ValueError, TypeError):
+                transformed_data['five_day_change'] = 0.0
+        else:
+            transformed_data['five_day_change'] = 0.0
         
         # 最后检查确保所有数值字段都是有效的浮点数
         for key in ['change_percent', 'current_price', 'volume', 'turnover']:
@@ -146,6 +159,39 @@ def get_all_stocks():
             stock_data.update_data()
         
         result = stock_data.data_cache.get('all_stocks', [])
+        
+        # 获取查询参数
+        search_text = request.args.get('search', '').lower()
+        five_day_filter = request.args.get('five_day_filter')
+        
+        # 应用过滤条件
+        if search_text or five_day_filter:
+            filtered_result = []
+            for stock in result:
+                # 文本搜索
+                text_match = True
+                if search_text:
+                    text_match = any(
+                        search_text in str(value).lower() 
+                        for value in stock.values()
+                    )
+                
+                # 5日涨幅过滤
+                five_day_match = True
+                if five_day_filter:
+                    five_day_change = stock.get('five_day_change', 0)
+                    if five_day_filter == 'up10':
+                        five_day_match = five_day_change >= 10
+                    elif five_day_filter == 'up5':
+                        five_day_match = 5 <= five_day_change < 10
+                    elif five_day_filter == 'down5':
+                        five_day_match = five_day_change <= -5
+                
+                if text_match and five_day_match:
+                    filtered_result.append(stock)
+            
+            result = filtered_result
+        
         print("API返回数据示例：")
         if result:
             print(f"总数据条数: {len(result)}")
