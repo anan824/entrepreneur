@@ -14,7 +14,9 @@ class StockData:
     def __init__(self):
         self.data_cache = {}
         self.last_update = None
-        
+        self.detail_cache = {}  # 新增：详细信息缓存
+        self.detail_cache_time = {}  # 新增：详细信息缓存时间
+
     def transform_stock_data(self, stock_data):
         # 字段映射关系
         field_mapping = {
@@ -209,3 +211,64 @@ if __name__ == '__main__':
     stock_data.update_data()
     # 启动Flask服务，改用8000端口
     app.run(debug=True, port=8000)
+
+
+    def get_stock_info(self, stock_code):
+        try:
+            # 检查缓存是否存在且未过期（30分钟有效期）
+            current_time = datetime.now()
+            if (stock_code in self.detail_cache and 
+                stock_code in self.detail_cache_time and 
+                (current_time - self.detail_cache_time[stock_code]).total_seconds() < 1800):
+                print(f"从缓存获取股票 {stock_code} 的详细信息")
+                return self.detail_cache[stock_code]
+
+            print(f"从API获取股票 {stock_code} 的详细信息")
+            # 获取个股资金流向
+            capital_flow = ak.stock_individual_fund_flow(stock=stock_code)
+            time.sleep(1)  # 添加延时避免频繁请求
+            
+            # 获取机构评级
+            rating = ak.stock_rank_forecast_cninfo(symbol=stock_code)
+            time.sleep(1)
+            
+            # 获取主营业务构成
+            business = ak.stock_zygc_ym(symbol=stock_code)
+            time.sleep(1)
+            
+            # 获取股东人数及持股集中度
+            holders = ak.stock_gdfx_holding_analyse(symbol=stock_code)
+            
+            data = {
+                'capital_flow': capital_flow.to_dict('records') if not capital_flow.empty else [],
+                'rating': rating.to_dict('records') if not rating.empty else [],
+                'business': business.to_dict('records') if not business.empty else [],
+                'holders': holders.to_dict('records') if not holders.empty else [],
+                'cache_time': current_time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+            
+            # 更新缓存
+            self.detail_cache[stock_code] = data
+            self.detail_cache_time[stock_code] = current_time
+            
+            return data
+        except Exception as e:
+            print(f"获取股票详细信息失败: {str(e)}")
+            # 如果获取失败但缓存存在，返回缓存的数据
+            if stock_code in self.detail_cache:
+                print(f"返回缓存的数据（可能已过期）")
+                return self.detail_cache[stock_code]
+            return {}
+
+    def clear_expired_cache(self):
+        """清理过期缓存"""
+        current_time = datetime.now()
+        expired_codes = []
+        
+        for code, cache_time in self.detail_cache_time.items():
+            if (current_time - cache_time).total_seconds() >= 1800:  # 30分钟过期
+                expired_codes.append(code)
+        
+        for code in expired_codes:
+            del self.detail_cache[code]
+            del self.detail_cache_time[code]
